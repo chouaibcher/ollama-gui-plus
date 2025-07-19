@@ -1,0 +1,18 @@
+# Production Dependencies
+# This project uses only Python standard library modules
+# No external dependencies required for core functionality
+
+# Development Dependencies (optional)
+# Uncomment the following lines if you want to set up a development environment
+
+# Testing
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+
+# Code formatting and linting
+# black>=23.0.0
+# flake8>=6.0.0
+# mypy>=1.0.0
+
+# Note: All dependencies are optional since the application
+# is designed to work with Python standard library only

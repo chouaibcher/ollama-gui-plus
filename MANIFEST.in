@@ -1,0 +1,21 @@
+include README.md
+include LICENSE
+include ARCHITECTURE.md
+include REFACTORING_SUMMARY.md
+include pyproject.toml
+include setup.py
+include main.py
+
+recursive-include src *.py
+recursive-include src */__init__.py
+
+# Exclude development and build files
+exclude .gitignore
+exclude .github
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.so
+recursive-exclude * .DS_Store
+exclude build
+exclude dist
+exclude *.egg-info
