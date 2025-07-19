@@ -1,6 +1,5 @@
 # Production Dependencies
-# This project uses only Python standard library modules
-# No external dependencies required for core functionality
+TKinterModernThemes>=1.0.0
 
 # Development Dependencies (optional)
 # Uncomment the following lines if you want to set up a development environment

@@ -1,6 +1,6 @@
 """
 Main view for the Ollama GUI application.
-This module contains the main window and chat interface.
+This module contains the main window and chat interface with modern themes.
 """
 
 import tkinter as tk
@@ -11,19 +11,27 @@ from typing import List, Optional
 from ..models.chat_models import Model, ChatMessage
 from ..viewmodels.chat_viewmodel import ChatViewModel
 from ..utils.system_utils import system_check, get_platform_right_click_event
+from ..utils.modern_theme_manager import SimpleThemeManager, theme_manager
+from ..utils.document_processor import document_store
 from .model_management_view import ModelManagementView
+from .document_management_view import DocumentManagementView
 
 
 class MainView:
-    """Main application window and chat interface."""
+    """Main application window and chat interface with modern themes."""
     
-    def __init__(self, root: tk.Tk):
-        self.root = root
+    def __init__(self, parent_frame, app_instance=None):
+        self.root = parent_frame
+        self.app_instance = app_instance  # Reference to main app for theme switching
         self.viewmodel = ChatViewModel()
         self.default_font = font.nametofont("TkTextFont").actual()["family"]
         self.label_widgets: List[tk.Label] = []
         self.model_management_view: Optional[ModelManagementView] = None
+        self.document_management_view: Optional[DocumentManagementView] = None
         self.editor_window: Optional[tk.Toplevel] = None
+        
+        # Initialize simple theme manager
+        self.theme_manager = theme_manager
         
         # UI Components
         self.chat_box: Optional[tk.Text] = None
@@ -34,11 +42,28 @@ class MainView:
         self.send_button: Optional[ttk.Button] = None
         self.refresh_button: Optional[ttk.Button] = None
         self.model_select: Optional[ttk.Combobox] = None
+        self.theme_button: Optional[ttk.Button] = None
         
         self._setup_viewmodel_callbacks()
+        self._configure_fonts()
         self._init_layout()
+        self._apply_initial_theme()
         self._check_system()
         self.viewmodel.refresh_models()
+    
+    def _configure_fonts(self) -> None:
+        """Configure application fonts."""
+        # Create custom fonts for better typography
+        self.heading_font = font.Font(family=self.default_font, size=12, weight="bold")
+        self.body_font = font.Font(family=self.default_font, size=10)
+        self.ui_font = font.Font(family=self.default_font, size=9)
+    
+    def _apply_initial_theme(self) -> None:
+        """Apply initial theme to the application."""
+        # The theme is already applied by ThemedTk in main.py
+        # Just configure chat components if they exist
+        if self.chat_box:
+            self.theme_manager.style_chat_widget(self.chat_box)
     
     def _setup_viewmodel_callbacks(self) -> None:
         """Setup callbacks between viewmodel and view."""
@@ -62,132 +87,373 @@ class MainView:
         self._configure_chat_box_tags()
     
     def _create_header_frame(self) -> None:
-        """Create the header with model selection and host input."""
+        """Create the header with model selection, theme toggle, and host input."""
         header_frame = ttk.Frame(self.root)
         header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=20)
-        header_frame.grid_columnconfigure(3, weight=1)
+        header_frame.grid_columnconfigure(6, weight=1)
 
-        self.model_select = ttk.Combobox(header_frame, state="readonly", width=30)
+        # Model selection
+        self.model_select = ttk.Combobox(
+            header_frame, 
+            state="readonly", 
+            width=30,
+            font=self.body_font
+        )
         self.model_select.grid(row=0, column=0)
         self.model_select.bind("<<ComboboxSelected>>", self._on_model_selected)
 
+        # Settings button with enhanced styling
         settings_button = ttk.Button(
-            header_frame, text="⚙️", command=self._show_model_management, width=3
+            header_frame, 
+            text="⚙️", 
+            command=self._show_model_management, 
+            width=3
         )
         settings_button.grid(row=0, column=1, padx=(5, 0))
 
+        # Refresh button
         self.refresh_button = ttk.Button(
-            header_frame, text="Refresh", command=self._on_refresh_models
+            header_frame, 
+            text="🔄", 
+            command=self._on_refresh_models
         )
         self.refresh_button.grid(row=0, column=2, padx=(5, 0))
 
-        ttk.Label(header_frame, text="Host:").grid(row=0, column=4, padx=(10, 0))
+        # Theme toggle button
+        current_mode = self.app_instance.current_mode if self.app_instance else "dark"
+        self.theme_button = ttk.Button(
+            header_frame,
+            text="☀️" if current_mode == "dark" else "🌙",
+            command=self._toggle_theme,
+            width=3
+        )
+        self.theme_button.grid(row=0, column=3, padx=(5, 0))
 
-        self.host_input = ttk.Entry(header_frame, width=24)
-        self.host_input.grid(row=0, column=5, padx=(5, 15))
+        # RAG/Documents button with indicator
+        self.rag_enabled = tk.BooleanVar(value=True)  # RAG enabled by default
+        self.rag_button = ttk.Button(
+            header_frame,
+            text="📄✓" if self.rag_enabled.get() else "📄✗",
+            command=self._toggle_rag_mode,
+            width=4
+        )
+        self.rag_button.grid(row=0, column=4, padx=(5, 0))
+        
+        # Documents management button
+        self.docs_button = ttk.Button(
+            header_frame,
+            text="📁",
+            command=self._show_document_management,
+            width=3
+        )
+        self.docs_button.grid(row=0, column=5, padx=(5, 0))
+
+        # Host label and input
+        host_label = ttk.Label(
+            header_frame, 
+            text="Host:",
+            font=self.body_font
+        )
+        host_label.grid(row=0, column=7, padx=(10, 5))
+
+        self.host_input = ttk.Entry(
+            header_frame, 
+            width=24,
+            font=self.body_font
+        )
+        self.host_input.grid(row=0, column=8, padx=(0, 0))
         self.host_input.insert(0, self.viewmodel.state.api_url)
         self.host_input.bind("<Return>", self._on_host_changed)
         self.host_input.bind("<FocusOut>", self._on_host_changed)
     
     def _create_chat_container_frame(self) -> None:
-        """Create the chat display area."""
+        """Create the chat display area with a scrollable text widget."""
         chat_frame = ttk.Frame(self.root)
         chat_frame.grid(row=1, column=0, sticky="nsew", padx=20)
         chat_frame.grid_columnconfigure(0, weight=1)
         chat_frame.grid_rowconfigure(0, weight=1)
 
+        # Create a scrollable text widget
         self.chat_box = tk.Text(
             chat_frame,
+            font=(self.default_font, 11),
+            spacing1=8,
+            spacing2=4,
+            spacing3=8,
             wrap=tk.WORD,
-            state=tk.DISABLED,
-            font=(self.default_font, 12),
-            spacing1=5,
-            highlightthickness=0,
+            state=tk.DISABLED
         )
         self.chat_box.grid(row=0, column=0, sticky="nsew")
 
-        scrollbar = ttk.Scrollbar(chat_frame, orient="vertical", command=self.chat_box.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.chat_box.configure(yscrollcommand=scrollbar.set)
+        # Add vertical scrollbar
+        chat_scrollbar = ttk.Scrollbar(chat_frame, orient="vertical", command=self.chat_box.yview)
+        chat_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.chat_box.configure(yscrollcommand=chat_scrollbar.set)
 
         # Context menu for chat box
         chat_box_menu = tk.Menu(self.chat_box, tearoff=0)
         chat_box_menu.add_command(label="Copy All", command=self._copy_all)
         chat_box_menu.add_separator()
         chat_box_menu.add_command(label="Clear Chat", command=self._clear_chat)
-        
+
         self.chat_box.bind("<Configure>", self._resize_inner_text_widget)
         right_click = get_platform_right_click_event()
         self.chat_box.bind(right_click, lambda e: chat_box_menu.post(e.x_root, e.y_root))
+
+        # Apply theme to context menu
+        self.theme_manager.style_tk_widget(chat_box_menu, "menu")
     
     def _create_processbar_frame(self) -> None:
         """Create the progress bar area."""
-        process_frame = ttk.Frame(self.root, height=28)
-        process_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=10)
+        self.process_frame = ttk.Frame(self.root, height=40)
+        self.process_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=10)
+        self.process_frame.grid_columnconfigure(0, weight=1)
 
-        self.progress = ttk.Progressbar(
-            process_frame,
-            mode="indeterminate",
-            style="LoadingBar.Horizontal.TProgressbar",
-        )
+        # Create standard ttk progress bar
+        self.progress = ttk.Progressbar(self.process_frame, mode="indeterminate")
+        self.progress.grid(row=0, column=0, sticky="ew")
 
         self.stop_button = ttk.Button(
-            process_frame,
-            width=5,
-            text="Stop",
-            command=self._on_stop_processing,
+            self.process_frame,
+            width=8,
+            text="⏹ Stop",
+            command=self._on_stop_processing
         )
     
     def _create_input_frame(self) -> None:
-        """Create the user input area."""
+        """Create the enhanced user input area."""
         input_frame = ttk.Frame(self.root)
         input_frame.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 20))
         input_frame.grid_columnconfigure(0, weight=1)
 
+        # Create input container with better styling
+        input_container = ttk.Frame(input_frame)
+        input_container.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        input_container.grid_columnconfigure(0, weight=1)
+
         self.user_input = tk.Text(
-            input_frame, font=(self.default_font, 12), height=4, wrap=tk.WORD
+            input_container, 
+            font=(self.default_font, 11), 
+            height=4, 
+            wrap=tk.WORD,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=2,
+            padx=12,
+            pady=8
         )
         self.user_input.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         self.user_input.bind("<Key>", self._handle_key_press)
+        
+        # Apply theme to user input
+        self.theme_manager.style_tk_widget(self.user_input, "text")
 
+        # Enhanced send button
         self.send_button = ttk.Button(
-            input_frame,
-            text="Send",
-            command=self._on_send_message,
+            input_container,
+            text="📤 Send",
+            command=self._on_send_message
         )
-        self.send_button.grid(row=0, column=1)
+        self.send_button.grid(row=0, column=1, sticky="ns")
         self.send_button.state(["disabled"])
     
     def _create_menu_bar(self) -> None:
-        """Create the application menu bar."""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        """Create the enhanced application menu bar."""
+        # Find the root window (might be master's master in themed frames)
+        root_window = self.root
+        while hasattr(root_window, 'master') and root_window.master:
+            root_window = root_window.master
+        
+        menubar = tk.Menu(root_window)
+        root_window.config(menu=menubar)
+        
+        # Apply theme to menubar
+        self.theme_manager.style_tk_widget(menubar, "menu")
 
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="Model Management", command=self._show_model_management)
-        file_menu.add_command(label="Exit", command=self.root.quit)
+        file_menu.add_command(label="📄 Document Management (RAG)", command=self._show_document_management)
+        file_menu.add_separator()
+        file_menu.add_command(label="📊 RAG Statistics", command=self._show_rag_statistics)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=root_window.quit)
+        self.theme_manager.style_tk_widget(file_menu, "menu")
 
         # Edit menu
         edit_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Edit", menu=edit_menu)
         edit_menu.add_command(label="Copy All", command=self._copy_all)
         edit_menu.add_command(label="Clear Chat", command=self._clear_chat)
+        self.theme_manager.style_tk_widget(edit_menu, "menu")
+
+        # View menu with theme options
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="View", menu=view_menu)
+        
+        # Add theme submenu with restart functionality
+        theme_submenu = self._create_theme_menu(view_menu)
+        view_menu.add_cascade(label="🎨 Themes", menu=theme_submenu)
+        
+        view_menu.add_separator()
+        current_mode = self.app_instance.current_mode if self.app_instance else "dark"
+        next_mode = "Light" if current_mode == "dark" else "Dark"
+        view_menu.add_command(
+            label=f"Switch to {next_mode} Mode", 
+            command=self._toggle_theme
+        )
+        
+        # RAG settings submenu
+        view_menu.add_separator()
+        rag_menu = tk.Menu(view_menu, tearoff=0)
+        view_menu.add_cascade(label="📄 RAG Settings", menu=rag_menu)
+        
+        rag_menu.add_checkbutton(
+            label="Enable RAG Context", 
+            variable=self.rag_enabled,
+            command=self._update_rag_button_from_menu
+        )
+        
+        # Context preview toggle
+        self.show_context_preview = tk.BooleanVar(value=False)
+        rag_menu.add_checkbutton(
+            label="Show Context Preview", 
+            variable=self.show_context_preview
+        )
+        
+        self.theme_manager.style_tk_widget(rag_menu, "menu")
 
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="Source Code", command=self._open_homepage)
         help_menu.add_command(label="Help", command=self._show_help)
+        self.theme_manager.style_tk_widget(help_menu, "menu")
     
     def _configure_chat_box_tags(self) -> None:
         """Configure text tags for the chat box."""
+        is_dark = self.theme_manager.is_dark_mode()
+        
+        # Use appropriate colors based on dark/light mode
+        if is_dark:
+            accent_color = '#60A5FA'    # Blue accent for dark mode
+            error_color = '#F87171'     # Red for errors in dark mode
+            success_color = '#34D399'   # Green for success in dark mode
+        else:
+            accent_color = '#3B82F6'    # Blue accent for light mode
+            error_color = '#DC2626'     # Red for errors in light mode
+            success_color = '#059669'   # Green for success in light mode
+        
         self.chat_box.tag_configure(
-            "Bold", foreground="#ff007b", font=(self.default_font, 10, "bold")
+            "Bold", 
+            foreground=accent_color, 
+            font=(self.default_font, 11, "bold")
         )
-        self.chat_box.tag_configure("Error", foreground="red")
+        self.chat_box.tag_configure("Error", foreground=error_color)
+        self.chat_box.tag_configure("Success", foreground=success_color)
+        self.chat_box.tag_configure("info", foreground=accent_color, font=(self.default_font, 10, "italic"))
+        self.chat_box.tag_configure("rag_info", foreground=success_color, font=(self.default_font, 10, "bold"))
+        self.chat_box.tag_configure("rag_warning", foreground=error_color, font=(self.default_font, 10, "italic"))
+        self.chat_box.tag_configure("context_preview", foreground=accent_color, font=(self.default_font, 9, "italic"))
+        self.chat_box.tag_configure("user", foreground=accent_color, font=(self.default_font, 11, "bold"))
         self.chat_box.tag_configure("Right", justify="right")
+        self.chat_box.tag_configure("Center", justify="center")
+    
+    def _toggle_theme(self) -> None:
+        """Toggle between light and dark themes with application restart."""
+        if not self.app_instance:
+            # Fallback if no app instance available
+            messagebox.showinfo(
+                "Theme Change", 
+                "Please restart the application manually to change themes."
+            )
+            return
+        
+        # Get current theme info from app instance
+        current_theme = self.app_instance.current_theme
+        current_mode = self.app_instance.current_mode
+        
+        # Toggle the mode
+        new_mode = "light" if current_mode == "dark" else "dark"
+        
+        # Restart application with new theme
+        self.app_instance.restart_with_theme(current_theme, new_mode)
+    
+    def _create_theme_menu(self, parent_menu) -> tk.Menu:
+        """Create a theme submenu that works with app restart."""
+        theme_menu = tk.Menu(parent_menu, tearoff=0)
+        
+        # Available themes with proper names
+        themes = [
+            ("park", "Park (Excel-style)"),
+            ("sun-valley", "Sun Valley (Windows 11)"),
+            ("azure", "Azure (Blue accents)")
+        ]
+        
+        # Create submenus for dark and light themes
+        dark_menu = tk.Menu(theme_menu, tearoff=0)
+        light_menu = tk.Menu(theme_menu, tearoff=0)
+        
+        # Add dark themes
+        for theme_key, theme_name in themes:
+            dark_menu.add_command(
+                label=theme_name,
+                command=lambda t=theme_key: self._change_theme_with_restart(t, "dark")
+            )
+        
+        # Add light themes
+        for theme_key, theme_name in themes:
+            light_menu.add_command(
+                label=theme_name,
+                command=lambda t=theme_key: self._change_theme_with_restart(t, "light")
+            )
+        
+        # Add submenus
+        theme_menu.add_cascade(label="🌙 Dark Themes", menu=dark_menu)
+        theme_menu.add_cascade(label="☀️ Light Themes", menu=light_menu)
+        
+        # Style the menus
+        self.theme_manager.style_tk_widget(theme_menu, "menu")
+        self.theme_manager.style_tk_widget(dark_menu, "menu")
+        self.theme_manager.style_tk_widget(light_menu, "menu")
+        
+        return theme_menu
+    
+    def _change_theme_with_restart(self, theme: str, mode: str):
+        """Change to a specific theme with restart."""
+        if self.app_instance:
+            self.app_instance.restart_with_theme(theme, mode)
+        else:
+            messagebox.showinfo(
+                "Theme Change", 
+                f"Please restart the application manually to apply {theme} {mode} theme."
+            )
+    
+    def _update_menu_labels(self) -> None:
+        """Update menu labels after theme change."""
+        try:
+            menubar = self.root['menu']
+            if menubar:
+                # Find and update view menu
+                for i in range(menubar.index('end') + 1):
+                    try:
+                        menu_label = menubar.entrycget(i, 'label')
+                        if menu_label == "View":
+                            view_menu = menubar.nametowidget(menubar.entrycget(i, 'menu'))
+                            # Update the toggle menu item (should be the last one after separator)
+                            try:
+                                view_menu.entryconfig(
+                                    'end', 
+                                    label=f"Switch to {'Light' if self.theme_manager.is_dark_mode() else 'Dark'} Mode"
+                                )
+                            except tk.TclError:
+                                pass
+                            break
+                    except (tk.TclError, AttributeError):
+                        continue
+        except (tk.TclError, AttributeError):
+            pass
     
     # Event handlers
     def _on_model_selected(self, event=None) -> None:
@@ -224,14 +490,79 @@ class MainView:
         return ""
     
     def _on_send_message(self) -> None:
-        """Handle send message button click."""
+        """Handle send message button click with enhanced RAG context integration."""
         if not self.user_input:
             return
         
         message = self.user_input.get("1.0", "end-1c")
-        if message.strip():
-            self.user_input.delete("1.0", "end")
-            self.viewmodel.send_message(message)
+        if not message.strip():
+            return
+            
+        # Clear input immediately
+        self.user_input.delete("1.0", "end")
+        
+        # Show user message in chat first
+        self._append_text_to_chat(f"You: {message}\n", "user")
+        
+        # Check if RAG is enabled and we have documents
+        if (self.rag_enabled.get() and 
+            self.document_management_view and 
+            self.document_management_view.has_documents()):
+            
+            # Get relevant context from documents with details
+            search_results = self.document_management_view.search_documents_with_details(message)
+            
+            if search_results:
+                # Show RAG indicator with source info
+                source_files = list(set([r['filename'] for r in search_results]))
+                sources_text = ", ".join(source_files)
+                
+                self._append_text_to_chat(
+                    f"📄 RAG Context: Found {len(search_results)} relevant chunks from: {sources_text}\n", 
+                    "rag_info"
+                )
+                
+                # Create enhanced message with context and source citations
+                context_parts = []
+                for i, result in enumerate(search_results, 1):
+                    context_parts.append(
+                        f"[Source {i}: {result['filename']} - Relevance: {result['relevance']:.2f}]\n"
+                        f"{result['text']}"
+                    )
+                
+                context = "\n\n".join(context_parts)
+                
+                enhanced_message = f"""[SYSTEM: You are provided with relevant context from the user's uploaded documents. Please use this information to answer their question accurately. If the context doesn't contain relevant information, say so clearly.]
+
+CONTEXT FROM UPLOADED DOCUMENTS:
+{context}
+
+USER QUESTION: {message}
+
+Please answer the user's question using the provided context when relevant. If you use information from the context, mention which source(s) you're referencing."""
+                
+                # Show context preview (optional - can be toggled)
+                if hasattr(self, 'show_context_preview') and self.show_context_preview:
+                    self._append_text_to_chat(f"Context preview (first 200 chars): {context[:200]}...\n", "context_preview")
+                
+            else:
+                self._append_text_to_chat(
+                    f"📄 RAG: No relevant context found in uploaded documents for this query\n", 
+                    "rag_warning"
+                )
+                enhanced_message = message
+        else:
+            if not self.rag_enabled.get():
+                enhanced_message = message
+            else:
+                self._append_text_to_chat(
+                    f"📄 RAG: No documents uploaded. Upload documents to enable context-aware responses.\n", 
+                    "rag_warning"
+                )
+                enhanced_message = message
+        
+        # Send the message to the model
+        self.viewmodel.send_message(enhanced_message)
     
     def _on_stop_processing(self) -> None:
         """Handle stop processing button click."""
@@ -246,6 +577,55 @@ class MainView:
             )
         else:
             self.model_management_view.window.lift()
+    
+    def _show_document_management(self) -> None:
+        """Show the document management window for RAG functionality."""
+        if not self.document_management_view:
+            self.document_management_view = DocumentManagementView(self.root)
+        self.document_management_view.show_window()
+    
+    def _toggle_rag_mode(self) -> None:
+        """Toggle RAG functionality on/off."""
+        self.rag_enabled.set(not self.rag_enabled.get())
+        
+        # Update button appearance
+        if self.rag_enabled.get():
+            self.rag_button.configure(text="📄✓")
+            status_msg = "📄 RAG Mode: ENABLED - Documents will be used as context"
+        else:
+            self.rag_button.configure(text="📄✗")
+            status_msg = "📄 RAG Mode: DISABLED - Documents will NOT be used"
+        
+        # Show status in chat
+        self._append_text_to_chat(f"{status_msg}\n", "info")
+    
+    def _update_rag_button_from_menu(self) -> None:
+        """Update RAG button when toggled from menu."""
+        if self.rag_enabled.get():
+            self.rag_button.configure(text="📄✓")
+        else:
+            self.rag_button.configure(text="📄✗")
+    
+    def _show_rag_statistics(self) -> None:
+        """Show RAG system statistics and status."""
+        if not self.document_management_view:
+            self.document_management_view = DocumentManagementView(self.root)
+        
+        docs = self.document_management_view.list_documents() if hasattr(self.document_management_view, 'list_documents') else []
+        doc_count = len(docs) if docs else len(document_store.list_documents())
+        
+        total_words = sum(doc.get('word_count', 0) for doc in document_store.list_documents())
+        
+        stats_msg = f"""📊 RAG System Status:
+• Status: {'ENABLED' if self.rag_enabled.get() else 'DISABLED'}
+• Documents: {doc_count} uploaded
+• Total Words: {total_words:,}
+• Context Preview: {'ON' if getattr(self, 'show_context_preview', False) and self.show_context_preview.get() else 'OFF'}
+• Storage: {document_store.storage_dir}
+
+💡 Tip: When RAG is enabled, your questions will be answered using context from uploaded documents when relevant."""
+        
+        messagebox.showinfo("RAG Statistics", stats_msg)
     
     def _copy_all(self) -> None:
         """Copy all chat history to clipboard."""
@@ -379,14 +759,14 @@ class MainView:
     
     # UI Helper methods
     def _show_process_bar(self) -> None:
-        """Show the progress bar."""
+        """Show the enhanced progress bar."""
         if self.progress and self.stop_button:
-            self.progress.grid(row=0, column=0, sticky="nsew")
-            self.stop_button.grid(row=0, column=1, padx=20)
-            self.progress.start(5)
+            self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+            self.stop_button.grid(row=0, column=1, sticky="ns")
+            self.progress.start(8)  # Slightly faster animation
     
     def _hide_process_bar(self) -> None:
-        """Hide the progress bar."""
+        """Hide the enhanced progress bar."""
         if self.progress and self.stop_button:
             self.progress.stop()
             self.stop_button.grid_remove()
@@ -414,48 +794,48 @@ class MainView:
             label.config(wraplength=max_width)
     
     def _create_inner_label(self, on_right_side: bool = False) -> None:
-        """Create a new label for chat messages."""
+        """Create a new enhanced label for chat messages."""
         if not self.chat_box:
             return
         
-        background = "#48a4f2" if on_right_side else "#eaeaea"
-        foreground = "white" if on_right_side else "black"
-        max_width = int(self.chat_box.winfo_reqwidth()) * 0.7
+        # Get current theme colors for styling
+        bubble_colors = self.theme_manager.get_chat_bubble_colors(on_right_side)
+        max_width = int(self.chat_box.winfo_reqwidth()) * 0.65
         
         inner_label = tk.Label(
             self.chat_box,
             justify=tk.LEFT,
             wraplength=max_width,
-            background=background,
-            highlightthickness=0,
-            highlightbackground=background,
-            foreground=foreground,
-            padx=8,
-            pady=8,
-            font=(self.default_font, 12),
-            borderwidth=0,
+            font=(self.default_font, 11),
+            bg=bubble_colors['bg'],
+            fg=bubble_colors['fg'],
+            relief=bubble_colors['relief'],
+            borderwidth=bubble_colors['borderwidth'],
+            padx=12,
+            pady=8
         )
         self.label_widgets.append(inner_label)
 
-        # Mouse wheel scrolling
+        # Enhanced mouse interactions
         inner_label.bind(
             "<MouseWheel>",
             lambda e: self.chat_box.yview_scroll(int(-1 * (e.delta / 120)), "units")
         )
-        
-        # Double-click to edit
         inner_label.bind("<Double-1>", lambda e: self._show_editor_window(inner_label))
 
-        # Context menu
+        # Enhanced context menu with theme support
         right_menu = tk.Menu(inner_label, tearoff=0)
         right_menu.add_command(
-            label="Edit", command=lambda: self._show_editor_window(inner_label)
+            label="✏️ Edit", command=lambda: self._show_editor_window(inner_label)
         )
         right_menu.add_command(
-            label="Copy This", command=lambda: self._copy_text(inner_label.cget("text"))
+            label="📋 Copy This", command=lambda: self._copy_text(inner_label.cget("text"))
         )
         right_menu.add_separator()
-        right_menu.add_command(label="Clear Chat", command=self._clear_chat)
+        right_menu.add_command(label="🗑️ Clear Chat", command=self._clear_chat)
+        
+        # Apply theme to context menu
+        self.theme_manager.style_tk_widget(right_menu, "menu")
         
         right_click = get_platform_right_click_event()
         inner_label.bind(right_click, lambda e: right_menu.post(e.x_root, e.y_root))
@@ -467,27 +847,54 @@ class MainView:
             self.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
     
     def _show_editor_window(self, inner_label: tk.Label) -> None:
-        """Show the message editor window."""
+        """Show the enhanced message editor window."""
         if self.editor_window and self.editor_window.winfo_exists():
             self.editor_window.lift()
             return
 
         self.editor_window = tk.Toplevel(self.root)
-        self.editor_window.title("Chat Editor")
+        self.editor_window.title("✏️ Edit Message")
+        
+        # Apply basic theme styling to editor window
+        if self.theme_manager.is_dark_mode():
+            self.editor_window.configure(bg='#2D2D2D')
+        else:
+            self.editor_window.configure(bg='#FFFFFF')
 
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        x = int((screen_width / 2) - (400 / 2))
-        y = int((screen_height / 2) - (300 / 2))
-        self.editor_window.geometry(f"{400}x{300}+{x}+{y}")
+        x = int((screen_width / 2) - (450 / 2))
+        y = int((screen_height / 2) - (350 / 2))
+        self.editor_window.geometry(f"450x350+{x}+{y}")
 
-        chat_editor = tk.Text(self.editor_window)
-        chat_editor.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        # Main frame
+        main_frame = ttk.Frame(self.editor_window)
+        main_frame.pack(fill="both", expand=True, padx=15, pady=15)
+        main_frame.grid_rowconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+
+        # Editor text widget with enhanced styling
+        chat_editor = tk.Text(
+            main_frame,
+            font=(self.default_font, 11),
+            wrap=tk.WORD,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=2,
+            padx=12,
+            pady=12
+        )
+        chat_editor.grid(row=0, column=0, sticky="nsew", pady=(0, 15))
         chat_editor.insert(tk.END, inner_label.cget("text"))
+        
+        # Apply theme to editor
+        self.theme_manager.style_tk_widget(chat_editor, "text")
 
-        self.editor_window.grid_rowconfigure(0, weight=1)
-        self.editor_window.grid_columnconfigure(0, weight=1)
-        self.editor_window.grid_columnconfigure(1, weight=1)
+        # Button frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=1, column=0, sticky="ew")
+        button_frame.grid_columnconfigure(0, weight=1)
+        button_frame.grid_columnconfigure(1, weight=1)
 
         def save_edit():
             try:
@@ -500,13 +907,22 @@ class MainView:
                 pass
             self.editor_window.destroy()
 
-        save_button = tk.Button(self.editor_window, text="Save", command=save_edit)
-        save_button.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-
-        cancel_button = tk.Button(
-            self.editor_window, text="Cancel", command=self.editor_window.destroy
+        # Enhanced buttons
+        save_button = ttk.Button(
+            button_frame, 
+            text="💾 Save", 
+            command=save_edit
         )
-        cancel_button.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+        save_button.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
-        self.editor_window.grid_columnconfigure(0, weight=1, uniform="btn")
-        self.editor_window.grid_columnconfigure(1, weight=1, uniform="btn")
+        cancel_button = ttk.Button(
+            button_frame, 
+            text="❌ Cancel", 
+            command=self.editor_window.destroy
+        )
+        cancel_button.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+
+        # Focus on editor
+        chat_editor.focus_set()
+        chat_editor.mark_set(tk.INSERT, "1.0")
+        chat_editor.see(tk.INSERT)
